@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14110f">
+<meta name="robots" content="noindex, nofollow">
+<title>Réplique</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icones/icone.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icones/icone-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="entete">
+  <h1 class="marque">Réplique<span class="point">.</span></h1>
+  <span class="etat" id="etat"></span>
+</header>
+
+<main>
+  <!-- RÉPONDRE -->
+  <section class="vue" id="vue-repondre">
+    <form class="saisie" id="form-saisie" autocomplete="off">
+      <label for="argument" class="etiquette">Ce qu'on te dit</label>
+      <textarea id="argument" rows="3" placeholder="« Taxer les riches, ça va faire couler la France… »"></textarea>
+      <div class="saisie-actions">
+        <button type="button" class="btn-micro" id="btn-micro" aria-label="Dicter l'argument">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg>
+          <span id="micro-texte">Dicter</span>
+        </button>
+        <button type="submit" class="btn-principal">Répondre</button>
+      </div>
+    </form>
+
+    <div id="resultat" aria-live="polite"></div>
+
+    <div class="recents" id="recents"></div>
+  </section>
+
+  <!-- FICHES -->
+  <section class="vue" id="vue-fiches" hidden>
+    <input type="search" id="recherche-fiches" class="champ" placeholder="Chercher une fiche…">
+    <div class="filtres" id="filtres-themes"></div>
+    <p class="compte" id="compte-fiches"></p>
+    <ul class="liste" id="liste-fiches"></ul>
+  </section>
+
+  <!-- 2027 -->
+  <section class="vue" id="vue-programmes" hidden>
+    <input type="search" id="recherche-programmes" class="champ" placeholder="Un sujet : santé, retraites, impôts…">
+    <div class="filtres" id="sujets-programmes"></div>
+    <div id="zone-programmes"></div>
+  </section>
+
+  <!-- VALEURS -->
+  <section class="vue" id="vue-valeurs" hidden>
+    <p class="aide">Ce que tu défends dans un débat. Les réponses de Gemini et le comparateur s'en servent pour juger chaque position, LFI comprise.</p>
+    <ul class="liste-valeurs" id="liste-valeurs"></ul>
+    <label class="etiquette" for="nuances">Ce que je précise</label>
+    <textarea id="nuances" class="champ" rows="4" placeholder="Par exemple : les points du programme LFI avec lesquels je ne suis pas d'accord."></textarea>
+    <div class="ligne-boutons">
+      <button class="btn-second" id="btn-nuances">Enregistrer</button>
+      <button class="btn-lien" id="btn-valeurs-defaut">Revenir aux valeurs de départ</button>
+    </div>
+    <p class="aide" id="retour-nuances"></p>
+  </section>
+
+  <!-- GARDÉES -->
+  <section class="vue" id="vue-gardees" hidden>
+    <p class="aide">Ton carnet : ce que l'appli n'a pas su régler sur le moment, et les réponses de Gemini que tu as gardées. Exporte-le de temps en temps et donne-le à Claude pour qu'il vérifie, complète et intègre tout à la base.</p>
+    <div class="ligne-boutons">
+      <button class="btn-principal" id="btn-exporter">Exporter le carnet</button>
+      <button class="btn-second" id="btn-importer">Importer</button>
+    </div>
+    <h2 class="titre-section">À traiter <span id="compte-atraiter"></span></h2>
+    <p class="aide">Arguments restés sans réponse sûre. Note aussi ce que tu n'as pas pu vérifier sur le moment, par exemple « tel élu a dit qu'il ferait ça ».</p>
+    <div class="ligne-champ">
+      <input id="texte-noter" class="champ" placeholder="Ce qu'on m'a dit…">
+      <button class="btn-second" id="btn-noter">Noter</button>
+    </div>
+    <ul class="liste" id="liste-atraiter" style="margin-top:10px"></ul>
+    <h2 class="titre-section">Fiches gardées</h2>
+    <ul class="liste" id="liste-gardees"></ul>
+    <div id="zone-echange" hidden>
+      <textarea id="texte-echange" class="champ" rows="6"></textarea>
+      <div class="ligne-boutons">
+        <button class="btn-second" id="btn-valider-import">Valider l'import</button>
+        <button class="btn-lien" id="btn-fermer-echange">Fermer</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- RÉGLAGES -->
+  <section class="vue" id="vue-reglages" hidden>
+    <form id="form-reglages" class="reglages" autocomplete="off">
+      <label class="etiquette" for="cle">Clé API Gemini</label>
+      <input id="cle" class="champ" type="password" placeholder="Colle ta clé AI Studio">
+      <p class="aide">Gratuite sur aistudio.google.com, rubrique « Get API key ». Elle reste dans ce téléphone.</p>
+
+      <label class="etiquette" for="modele">Modèle</label>
+      <div class="ligne-champ">
+        <select id="modele" class="champ"></select>
+        <button type="button" class="btn-second" id="btn-modeles">Actualiser</button>
+      </div>
+      <p class="aide">Prends un modèle « flash » : il répond en quelques secondes.</p>
+
+      <label class="case"><input type="checkbox" id="auto-gemini"> Demander à Gemini quand aucune fiche ne correspond</label>
+      <label class="case"><input type="checkbox" id="auto-envoi"> Répondre dès la fin de la dictée</label>
+
+      <div class="ligne-boutons">
+        <button type="submit" class="btn-principal">Enregistrer</button>
+        <button type="button" class="btn-second" id="btn-tester">Tester la clé</button>
+      </div>
+      <p class="aide" id="retour-reglages"></p>
+    </form>
+    <p class="aide pied" id="version-base"></p>
+  </section>
+</main>
+
+<nav class="onglets" id="onglets">
+  <button data-vue="repondre" class="actif">Répondre</button>
+  <button data-vue="fiches">Fiches</button>
+  <button data-vue="programmes">2027</button>
+  <button data-vue="valeurs">Valeurs</button>
+  <button data-vue="gardees">Carnet</button>
+  <button data-vue="reglages">Réglages</button>
+</nav>
+
+<script src="app.js"></script>
+</body>
+</html>
