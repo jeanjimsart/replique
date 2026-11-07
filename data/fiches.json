@@ -1,5 +1,5 @@
 {
- "version": "2026-11-06",
+ "version": "2026-11-07",
  "fiches": [
   {
    "id": "cpt-001",
@@ -2068,7 +2068,10 @@
     "y'a pas d'autre solution que l'âge de départ",
     "augmenter les cotisations c'est impossible",
     "on n'a pas le choix, c'est l'âge ou rien",
-    "comment vous financez ça alors"
+    "comment vous financez ça alors",
+    "la retraite à 64 ans c'est obligatoire",
+    "la réforme à 64 ans était nécessaire",
+    "on n'avait pas le choix pour les 64 ans"
    ],
    "motsCles": [
     "age",
@@ -6871,7 +6874,10 @@
     "ils vont augmenter les impôts de tous",
     "14 tranches d'impôt, on va tous payer",
     "ils veulent faire fuir les riches",
-    "on va payer pour leurs promesses"
+    "on va payer pour leurs promesses",
+    "avec LFI on va être encore plus taxé",
+    "LFI va nous taxer encore plus",
+    "avec eux on paiera encore plus d'impôts"
    ],
    "motsCles": [
     "14 tranches",
@@ -9179,7 +9185,10 @@
     "ils veulent nous interdire la voiture, le chauffage, la viande",
     "c'est toujours le petit qui paie",
     "l'écologie c'est pour les bobos des villes",
-    "on nous culpabilise pour tout"
+    "on nous culpabilise pour tout",
+    "les écolos veulent nous faire revenir à la bougie",
+    "les écolos veulent nous ramener à l'âge de pierre",
+    "les écolos sont des Amish"
    ],
    "motsCles": [
     "carbone",
@@ -12488,7 +12497,11 @@
     "Les riches ont bossé plus dur que les autres",
     "La réussite, c'est le mérite, pas la naissance",
     "Les gens ont ce qu'ils méritent",
-    "Si t'es pauvre, t'as pas assez travaillé"
+    "Si t'es pauvre, t'as pas assez travaillé",
+    "Bernard Arnault mérite son salaire",
+    "les milliardaires ont mérité leur argent",
+    "il a mérité sa fortune",
+    "les patrons méritent ce qu'ils gagnent"
    ],
    "motsCles": [
     "fortune",

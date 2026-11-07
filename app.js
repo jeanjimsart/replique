@@ -6,7 +6,7 @@ const LS = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 };
 
-const REGLAGES_DEFAUT = { cle: '', modele: 'gemini-2.5-flash', autoGemini: true, autoEnvoi: true };
+const REGLAGES_DEFAUT = { cle: '', modele: '', autoGemini: true, autoEnvoi: true };
 /* ---------- Mes valeurs ---------- */
 // Textes cités mot pour mot (Légifrance / conseil-constitutionnel.fr).
 const VALEURS_DEFAUT = [
@@ -55,7 +55,7 @@ const urlSure = u => /^https?:\/\//i.test(u || '') ? u : '';
 const aujourdhui = () => new Date().toISOString().slice(0, 10);
 
 /* ---------- Recherche locale ---------- */
-const MOTS_VIDES = new Set(('le la les un une des de du d l et ou a au aux en dans sur pour par avec sans ce ces cet cette c ca est sont etre ete on il ils elle elles nous vous je j tu te t me m se s y que qui quoi quand comment pourquoi ne n pas plus moins tres trop tout tous toute toutes fait font va vont aller mais donc car si comme leur leurs son sa ses mon ma mes ton ta tes notre nos votre vos lui eux meme deja encore bien alors aussi juste vraiment avoir ont avait ai as sera serait faut peut peuvent dit dire quand meme the oui non hein bah ben enfin genre voila maintenant partout aujourd hui franchement carrement cousin pote mec disent pense crois trouve vois sais tellement chez gars type mere pere oncle tante beau frere soeur coup fait truc machin bref quoi style').split(' '));
+const MOTS_VIDES = new Set(('le la les un une des de du d l et ou a au aux en dans sur veux veut voulez voulais pour par avec sans ce ces cet cette c ca est sont etre ete on il ils elle elles nous vous je j tu te t me m se s y que qui quoi quand comment pourquoi ne n pas plus moins tres trop tout tous toute toutes fait font va vont aller mais donc car si comme leur leurs son sa ses mon ma mes ton ta tes notre nos votre vos lui eux meme deja encore bien alors aussi juste vraiment avoir ont avait ai as sera serait faut peut peuvent dit dire quand meme the oui non hein bah ben enfin genre voila maintenant partout aujourd hui franchement carrement cousin pote mec disent pense crois trouve vois sais tellement chez gars type mere pere oncle tante beau frere soeur coup fait truc machin bref quoi style').split(' '));
 
 function normaliser(s) {
   return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -69,7 +69,7 @@ function racine(m) {
   if (s1.length >= 4) m = s1;
   m = m.replace(/aux$/, 'al');
   const s2 = m.replace(/(aient|ait|ent|ez|ons|er)$/, '');
-  if (s2.length >= 4) m = s2;
+  if (s2.length >= 4 || (s2.length === 3 && /er$/.test(m))) m = s2;   // taxer → tax, comme taxe / taxé
   m = m.replace(/(es|s|x|e)$/, '');
   return m.slice(0, 7);
 }
@@ -149,6 +149,35 @@ Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour, de cette forme
 {"titre":"« formulation courte de l'argument »","simple":"...","theme":"economie|immigration|securite|social|retraites|ecologie|services-publics|lfi|votes|valeurs|autre","replique":"...","ceQuiEstVrai":"... ou chaîne vide","preuves":[{"fait":"fait chiffré précis","source":"Organisme, année","url":"https://..."}],"enFace":{"texte":"1 à 2 phrases","preuves":[{"fait":"...","source":"...","url":"https://..."}]} ou null,"question":"...","lfiATort":false,"desaccordValeurs":"... ou chaîne vide","arbitrage":{"accueil":"...","choix":["..."]} ou null,"pourAllerPlusLoin":"3 à 5 phrases","variantes":["3 à 5 autres formulations courantes de l'argument"],"motsCles":["6 à 10 mots simples sans accents"]}`;
 }
 
+const API = 'https://generativelanguage.googleapis.com/v1beta/models';
+function meilleurModele(liste) {
+  const version = id => parseFloat((id.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+  const note = id => version(id) * 10 + (/flash/.test(id) ? 5 : 0) - (/lite/.test(id) ? 3 : 0) - (/preview|exp/.test(id) ? 2 : 0) - (/latest/.test(id) ? 1 : 0);
+  return [...liste].sort((a, b) => note(b.id) - note(a.id))[0]?.id || '';
+}
+async function choisirModele() {
+  const l = await listerModeles(); LS.set('argu.modeles', l);
+  const m = meilleurModele(l);
+  if (!m) throw new Error('Aucun modèle Gemini disponible avec cette clé.');
+  state.reglages.modele = m; LS.set('argu.reglages', state.reglages);
+  if ($('#modele')) remplirModeles(l);
+  return m;
+}
+// Un seul point d'appel : si le modèle n'existe plus, on prend le plus récent disponible et on réessaie une fois.
+async function appelGemini(corps) {
+  const r = state.reglages;
+  if (!r.modele) await choisirModele();
+  const essai = () => fetch(`${API}/${encodeURIComponent(state.reglages.modele)}:generateContent`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': r.cle }, body: JSON.stringify(corps)
+  });
+  let rep = await essai(), data = await rep.json().catch(() => ({}));
+  if (!rep.ok && (rep.status === 404 || /no longer available|not found|is not supported|deprecated/i.test(data?.error?.message || ''))) {
+    await choisirModele();
+    rep = await essai(); data = await rep.json().catch(() => ({}));
+  }
+  return { rep, data };
+}
+
 async function demanderGemini(argument, proches) {
   const r = state.reglages;
   if (!r.cle) throw new Error('Ajoute ta clé Gemini dans Réglages.');
@@ -158,18 +187,12 @@ async function demanderGemini(argument, proches) {
     texte += `\n\nFiches proches déjà dans la base (réutilise-les si elles répondent vraiment, sinon ignore-les) :\n` +
       proches.map(p => `- ${p.fiche.titre} → ${p.fiche.replique}`).join('\n');
   }
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(r.modele)}:generateContent`;
-  const rep = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': r.cle },
-    body: JSON.stringify({
+  const { rep, data } = await appelGemini({
       systemInstruction: { parts: [{ text: consignes() }] },
       contents: [{ role: 'user', parts: [{ text: texte }] }],
       tools: [{ google_search: {} }],
       generationConfig: { temperature: 0.3 }
-    })
   });
-  const data = await rep.json().catch(() => ({}));
   if (!rep.ok) {
     const msg = data?.error?.message || `Erreur ${rep.status}`;
     if (rep.status === 429) throw new Error('Quota gratuit atteint pour l\'instant, réessaie dans une minute.');
@@ -225,13 +248,7 @@ Ensuite :
 - garde "enFace" seulement si son contenu est confirmé, sinon null.
 Réponds UNIQUEMENT par ce JSON :
 {"preuves":[{"n":1,"verdict":"confirme|inexact|introuvable","note":"courte explication","source2":"organisme, document, date de la source qui confirme","url2":"https://..."}],"simple":"...","replique":"...","ceQuiEstVrai":"...","enFace":{"texte":"...","preuves":[]} ou null}`;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(r.modele)}:generateContent`;
-  const rep = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': r.cle },
-    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: consigne }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0 } })
-  });
-  const data = await rep.json().catch(() => ({}));
+  const { rep, data } = await appelGemini({ contents: [{ role: 'user', parts: [{ text: consigne }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0 } });
   if (!rep.ok) {
     if (rep.status === 429) throw new Error('Quota gratuit atteint pendant la vérification : réessaie dans une minute.');
     throw new Error('La vérification a échoué : rien n\'est affiché tant que ce n\'est pas vérifié.');
@@ -262,17 +279,11 @@ Réponds UNIQUEMENT par ce JSON :
 async function aiguiller(argument, candidats) {
   const r = state.reglages;
   const liste = candidats.map((c, i) => `${i + 1}. ${c.fiche.titre}`).join('\n');
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(r.modele)}:generateContent`;
-  const rep = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': r.cle },
-    body: JSON.stringify({
+  const { rep, data } = await appelGemini({
       contents: [{ role: 'user', parts: [{ text: `Dans un débat, quelqu'un dit : « ${argument} »\n\nVoici des fiches de réponse :\n${liste}\n\nQuelle fiche répond DIRECTEMENT à cet argument précis (même idée, pas juste le même sujet) ? Réponds uniquement par son numéro, ou 0 si aucune ne convient.` }] }],
       generationConfig: { temperature: 0 }
-    })
   });
   if (!rep.ok) return null;
-  const data = await rep.json().catch(() => ({}));
   const t = (data.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('');
   const n = parseInt((t.match(/\d+/) || ['0'])[0], 10);
   return n >= 1 && n <= candidats.length ? candidats[n - 1] : 0;
@@ -619,10 +630,12 @@ function initMicro() {
 /* ---------- Réglages ---------- */
 function remplirModeles(liste) {
   const sel = $('#modele');
-  const ids = liste?.length ? liste : [{ id: state.reglages.modele, nom: state.reglages.modele }];
-  if (!ids.some(m => m.id === state.reglages.modele)) ids.unshift({ id: state.reglages.modele, nom: state.reglages.modele });
-  sel.innerHTML = ids.map(m => `<option value="${esc(m.id)}">${esc(m.nom)}${m.nom !== m.id ? ` (${esc(m.id)})` : ''}</option>`).join('');
-  sel.value = state.reglages.modele;
+  const courant = state.reglages.modele;
+  const ids = [...(liste || [])];
+  if (courant && !ids.some(m => m.id === courant)) ids.unshift({ id: courant, nom: courant });
+  ids.unshift({ id: '', nom: 'Automatique (le plus récent)' });
+  sel.innerHTML = ids.map(m => `<option value="${esc(m.id)}">${esc(m.nom)}${m.id && m.nom !== m.id ? ` (${esc(m.id)})` : ''}</option>`).join('');
+  sel.value = courant;
 }
 function initReglages() {
   $('#cle').value = state.reglages.cle;
@@ -630,7 +643,7 @@ function initReglages() {
   $('#auto-envoi').checked = state.reglages.autoEnvoi;
   remplirModeles(LS.get('argu.modeles', null));
   const lire = () => {
-    state.reglages = { cle: $('#cle').value.trim(), modele: $('#modele').value || REGLAGES_DEFAUT.modele, autoGemini: $('#auto-gemini').checked, autoEnvoi: $('#auto-envoi').checked };
+    state.reglages = { cle: $('#cle').value.trim(), modele: $('#modele').value || state.reglages.modele || '', autoGemini: $('#auto-gemini').checked, autoEnvoi: $('#auto-envoi').checked };
     LS.set('argu.reglages', state.reglages); majEtat();
   };
   $('#form-reglages').onsubmit = e => { e.preventDefault(); lire(); $('#retour-reglages').textContent = 'Enregistré.'; };
@@ -642,12 +655,8 @@ function initReglages() {
   $('#btn-tester').onclick = async () => {
     lire(); $('#retour-reglages').textContent = 'Test en cours…';
     try {
-      const rep = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(state.reglages.modele)}:generateContent`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': state.reglages.cle },
-        body: JSON.stringify({ contents: [{ parts: [{ text: 'Réponds juste OK.' }] }] })
-      });
-      const d = await rep.json().catch(() => ({}));
-      $('#retour-reglages').textContent = rep.ok ? 'La clé marche ✓' : (d?.error?.message || `Erreur ${rep.status}`);
+      const { rep, data: d } = await appelGemini({ contents: [{ parts: [{ text: 'Réponds juste OK.' }] }] });
+      $('#retour-reglages').textContent = rep.ok ? `La clé marche ✓ (${state.reglages.modele})` : (d?.error?.message || `Erreur ${rep.status}`);
     } catch (e) { $('#retour-reglages').textContent = e.message; }
   };
 }
