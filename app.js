@@ -194,20 +194,41 @@ async function appelGemini(corps) {
   let x = await essai(state.reglages.modele);
   if (retire(x)) { await choisirModele(); x = await essai(state.reglages.modele); }
   if (sature(x) && ![429, 504].includes(x.rep.status)) { signaler('Gemini est saturé, je réessaie…'); await new Promise(ok => setTimeout(ok, 1500)); x = await essai(state.reglages.modele); }
-  if (sature(x)) {
+  // 429 : Google précise s'il s'agit d'une limite par minute ou par jour, et combien attendre (RetryInfo).
+  const infoQuota = y => {
+    const d = y.data?.error?.details || [], t = JSON.stringify(d);
+    return { attente: parseFloat(d.find(e => /RetryInfo/.test(e['@type'] || ''))?.retryDelay || '') || 0,
+             parJour: /PerDay/i.test(t), limite: (t.match(/"quotaValue"\s*:\s*"?(\d+)/) || [])[1] || '' };
+  };
+  const autres = async (n) => {
     if (!LS.get('argu.modeles', null)) { try { LS.set('argu.modeles', await listerModeles()); } catch {} }
-    for (const m of classement().filter(m => m !== state.reglages.modele).slice(0, 3)) {
-      signaler(`Gemini est saturé, j'essaie ${m}…`);
+    for (const m of classement().filter(m => m !== state.reglages.modele).slice(0, n)) {
+      signaler(`Limite ou saturation sur ${state.reglages.modele}, j'essaie ${m}…`);
       const y = await essai(m);
-      if (y.rep.ok) return { ...y, modele: m };
-      if (!sature(y) && !retire(y)) { x = y; break; }
+      if (y.rep.ok || (!sature(y) && !retire(y))) return { ...y, modele: m };
+    }
+    return null;
+  };
+  if (sature(x)) {
+    const q = x.rep.status === 429 ? infoQuota(x) : null;
+    const y = await autres(q && !q.parJour ? 1 : 3);   // limite par minute : un seul autre modèle, puis on patiente
+    if (y?.rep.ok) return y;
+    if (y) x = y;
+    else if (q && !q.parJour) {
+      for (let t = Math.min(Math.ceil(q.attente || 20), 45); t > 0; t--) {
+        signaler(`Limite gratuite par minute atteinte : je réessaie dans ${t} s…`);
+        await new Promise(ok => setTimeout(ok, 1000));
+      }
+      x = await essai(state.reglages.modele);
     }
   }
   const brutGoogle = (x.data?.error?.message || '').replace(/\s+/g, ' ').slice(0, 300);
   if (sature(x)) x.data = { error: { detail: brutGoogle, message: x.rep.status === 504 && x.data?.error?.message === 'timeout'
     ? 'Gemini ne répond pas (réseau lent ou serveurs saturés) : réessaie dans une minute. Tes fiches marchent toujours.'
+    : x.rep.status === 429 && infoQuota(x).parJour
+    ? `Quota gratuit du jour atteint${infoQuota(x).limite ? ` (${infoQuota(x).limite} requêtes par jour)` : ''} sur tous les modèles essayés : Gemini revient demain. Tes fiches marchent toujours.`
     : x.rep.status === 429
-    ? 'Quota gratuit de Gemini atteint pour l\'instant : réessaie dans une minute. Tes fiches marchent toujours.'
+    ? `Limite gratuite par minute atteinte${infoQuota(x).limite ? ` (${infoQuota(x).limite} requêtes par minute)` : ''} : réessaie dans une minute. Tes fiches marchent toujours.`
     : 'Gemini est saturé en ce moment (forte demande chez Google) : réessaie dans une minute. Tes fiches marchent toujours.' } };
   return { ...x, modele: state.reglages.modele };
 }
