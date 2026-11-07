@@ -178,3 +178,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .parti-vote .src { display: block; font-size: .8rem; color: var(--doux); }
 .parti-ecart { border-left: 3px solid var(--nuance-trait); padding-left: 8px; }
 .parti a { color: var(--gemini); word-break: break-word; }
+/* Claude / Gemini via les applis */
+.bloc-ia { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--trait); }
+.ia-boutons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ia-boutons button { padding-inline: 6px; }
+.bloc-ia .retour { font-size: .84rem; color: var(--doux); margin: 6px 0 0; }
+.bloc-ia textarea { margin-top: 8px; font-size: .85rem; }

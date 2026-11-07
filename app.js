@@ -6,7 +6,7 @@ const LS = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 };
 
-const REGLAGES_DEFAUT = { cle: '', modele: '', autoGemini: true, autoEnvoi: true };
+const REGLAGES_DEFAUT = { cle: '', modele: '', autoGemini: false, autoEnvoi: true };
 /* ---------- Mes valeurs ---------- */
 // Textes cités mot pour mot (Légifrance / conseil-constitutionnel.fr).
 const VALEURS_DEFAUT = [
@@ -381,7 +381,7 @@ function blocEnFace(e) {
 function carte(f, { autres = [], question = '', approx = false } = {}) {
   const origine = f.origine === 'gemini' ? (state.gardees.some(g => g.id === f.id) ? 'gardee' : 'gemini') : 'fiche';
   const badge = origine === 'fiche' ? `<span class="badge fiche">Fiche · ${esc(nomTheme(f.theme))}</span>`
-    : origine === 'gardee' ? `<span class="badge gardee">Gardée · à vérifier</span>`
+    : origine === 'gardee' ? `<span class="badge gardee">${f.ia ? `${esc(f.ia)} · ` : ''}à vérifier</span>`
     : `<span class="badge gemini">Gemini · ${f.verifiee ? 'faits recoupés' : 'non vérifié'}</span>`;
   const preuves = (f.preuves || []).map(p => {
     const u = urlSure(p.url);
@@ -421,7 +421,7 @@ function carte(f, { autres = [], question = '', approx = false } = {}) {
     </div>
     <div class="carte-actions">
       <button class="btn-second" data-act="copier">Copier</button>
-      ${origine === 'fiche' && question ? `<button class="btn-second" data-act="gemini">Demander à Gemini</button>` : ''}
+      ${origine === 'fiche' && question ? `<button class="btn-second" data-act="gemini">Demander à une IA</button>` : ''}
       ${origine === 'gemini' ? `<button class="btn-principal" data-act="garder">Garder en fiche</button>` : ''}
       ${question ? `<button class="btn-second" data-act="noter">À traiter</button>` : ''}
       ${(() => { const s = chercherSujets((question || '') + ' ' + (f.titre || ''))[0]; return s ? `<button class="btn-second" data-act="comparer" data-sujet="${esc(s.sujet.id)}">Comparer les partis</button>` : ''; })()}
@@ -442,7 +442,7 @@ function carte(f, { autres = [], question = '', approx = false } = {}) {
   el.querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
     const act = b.dataset.act;
     if (act === 'copier') copier(texteFiche(f), b);
-    if (act === 'gemini') lancerGemini(question, []);
+    if (act === 'gemini') { const z = el.querySelector('.bloc-ia') || el.appendChild(boutonsIA(question, [{ fiche: f }])); z.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
     if (act === 'garder') { garder(f); b.textContent = 'Gardée ✓'; b.disabled = true; }
     if (act === 'comparer') ouvrirComparateur(b.dataset.sujet);
     if (act === 'noter') { noterATraiter(question, 'Noté à la main : la réponse ne convient pas', f.titre ? `Fiche montrée : ${f.titre}` : ''); b.textContent = 'Noté ✓'; b.disabled = true; }
@@ -503,16 +503,10 @@ async function repondre(texte) {
     return afficher(carte(meilleur.fiche, { autres, question: texte, approx: true }));
   }
   const d = document.createElement('div');
-  const raison = !state.reglages.cle ? 'Ajoute ta clé Gemini dans Réglages pour couvrir les trous.'
-    : !navigator.onLine ? 'Pas de réseau pour demander à Gemini.' : '';
+  const raison = !navigator.onLine ? 'Pas de réseau pour demander à une IA.' : '';
   noterATraiter(texte, 'Aucune fiche ne correspond' + (raison ? ' (sans Gemini)' : ''));
   d.append(message(`Aucune fiche ne correspond vraiment. ${esc(raison)} Noté dans « À traiter ».`));
-  if (state.reglages.cle && navigator.onLine) {
-    const b = document.createElement('button');
-    b.className = 'btn-principal'; b.style.marginTop = '10px'; b.style.width = '100%';
-    b.textContent = 'Demander à Gemini'; b.onclick = () => lancerGemini(texte, res.slice(0, 3));
-    d.append(b);
-  }
+  if (navigator.onLine) d.append(boutonsIA(texte, res.slice(0, 3)));
   if (res.length) {
     const wrap = document.createElement('div');
     wrap.className = 'autres';
@@ -533,6 +527,7 @@ async function lancerGemini(texte, proches) {
     if (!f.replique || !f.preuves.length) {
       noterATraiter(texte, 'Gemini : rien de sûr trouvé', f.ecartees.map(x => `${x.verdict} : ${x.fait}`).join(' | '));
       const d = message(`Gemini n'a rien trouvé de sûr sur ce point${f.ecartees.length ? ` : ${f.ecartees.length} fait(s) écarté(s) à la vérification` : ''}. Mieux vaut ne pas avancer de chiffre. Noté dans « À traiter ».`);
+      d.append(boutonsIA(texte, proches, { api: false }));
       return afficher(d);
     }
     f.id = 'g-' + Date.now();
@@ -540,6 +535,7 @@ async function lancerGemini(texte, proches) {
   } catch (e) {
     noterATraiter(texte, 'Gemini indisponible', e.message);
     const d = message(esc(e.message) + ' Noté dans « À traiter ».', 'erreur');
+    d.append(boutonsIA(texte, proches, { api: false }));
     afficher(d);
   } finally { state.surAvancement = null; }
 }
@@ -557,9 +553,69 @@ function rendreRecents() {
   z.querySelectorAll('[data-i]').forEach(b => b.onclick = () => { const t = state.recents[+b.dataset.i]; $('#argument').value = t; repondre(t); });
 }
 
+
+/* ---------- Claude / Gemini (applis du téléphone, avec l'abonnement) ---------- */
+const APPLIS_IA = { claude: { nom: 'Claude', url: 'https://claude.ai/new' }, gemini: { nom: 'Gemini', url: 'https://gemini.google.com/app' } };
+function demandeIA(texte, proches = []) {
+  let c = consignes()
+    .replace('vérifiée avec la recherche Google', 'vérifiée par une recherche web (fais-la vraiment)')
+    .replace('ta recherche Google dans CETTE réponse', 'ta recherche web dans CETTE réponse')
+    .replace('Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour, de cette forme :',
+      `VÉRIFICATION : avant de répondre, revérifie chaque fait par une seconde recherche. Ne garde que ce qui est confirmé, de préférence par une source officielle. Si rien n'est sûr, dis-le et mets "replique": "".
+
+FORMAT DE TA RÉPONSE :
+1) D'abord en clair, 6 lignes au plus : la phrase simple, la réplique précise, la question à retourner, et ce qui est vrai en face s'il y a lieu.
+2) Puis, tout à la fin, le même contenu dans UN SEUL bloc de code \`\`\`json (je le colle dans mon appli), de cette forme :`);
+  c += `\n\nArgument entendu : « ${texte} »`;
+  if (proches.length) c += `\n\nMes fiches proches (réutilise-les seulement si elles répondent vraiment) :\n` + proches.map(p => `- ${p.fiche.titre} → ${p.fiche.replique}`).join('\n');
+  return c;
+}
+function boutonsIA(texte, proches = [], { api = true } = {}) {
+  const d = document.createElement('div');
+  d.className = 'bloc-ia';
+  d.innerHTML = `<p class="aide">Demande à une IA de ton abonnement : la demande est copiée, colle-la dans l'appli qui s'ouvre. Puis copie le bloc de code de sa réponse et reviens ici.</p>
+    <div class="ia-boutons"><button class="btn-principal" data-ia="claude">Demander à Claude</button><button class="btn-principal" data-ia="gemini">Demander à Gemini</button></div>
+    <button class="btn-second" data-coller style="width:100%;margin-top:8px">Coller la réponse de l'IA</button>
+    <div class="ia-coller" hidden><textarea class="champ" rows="5" placeholder="Colle ici le bloc de code de la réponse (ou toute la réponse)"></textarea>
+    <button class="btn-principal" data-ajouter style="width:100%;margin-top:8px">Ajouter à l'appli</button><p class="retour" aria-live="polite"></p></div>
+    ${api && state.reglages.cle ? `<button class="btn-lien" data-api style="margin-top:6px">Essayer l'API Gemini (quota gratuit limité)</button>` : ''}`;
+  d.querySelectorAll('[data-ia]').forEach(b => b.onclick = async () => {
+    const ia = APPLIS_IA[b.dataset.ia];
+    state.derniereIA = ia.nom;
+    try { await navigator.clipboard.writeText(demandeIA(texte, proches)); b.textContent = 'Copié ✓ colle-le'; } catch { b.textContent = 'Copie impossible'; }
+    window.open(ia.url, '_blank', 'noopener');
+  });
+  const zone = d.querySelector('.ia-coller'), champ = zone.querySelector('textarea'), retour = zone.querySelector('.retour');
+  d.querySelector('[data-coller]').onclick = async () => {
+    zone.hidden = false;
+    try { const t = await navigator.clipboard.readText(); if (t && t.includes('{')) champ.value = t; } catch {}
+    champ.focus();
+  };
+  d.querySelector('[data-ajouter]').onclick = () => {
+    const f = ficheDepuisIA(champ.value, texte);
+    if (!f) { retour.textContent = 'Je ne trouve pas le bloc de code dans ce texte. Copie bien le bloc ```json de la réponse.'; return; }
+    if (!f.replique) { noterATraiter(texte, `${f.ia} n'a rien trouvé de sûr`); retour.textContent = `${f.ia} n'a rien trouvé de sûr : noté dans « À traiter ».`; return; }
+    garder(f);
+    state.atraiter = state.atraiter.filter(x => x.texte !== texte); LS.set('argu.atraiter', state.atraiter);
+    afficher(carte(f, { question: texte }));
+  };
+  const a = d.querySelector('[data-api]'); if (a) a.onclick = () => lancerGemini(texte, proches);
+  return d;
+}
+function ficheDepuisIA(brut, texte) {
+  const j = extraireJSON(String(brut || '').replace(/^[^`{]*```(?:json)?/s, ''));
+  if (!j || typeof j !== 'object') return null;
+  const preuves = (Array.isArray(j.preuves) ? j.preuves : []).filter(p => p && p.fait).map(p => ({ fait: String(p.fait), source: String(p.source || ''), url: urlSure(p.url) || '' }));
+  return {
+    ...j, id: 'ia-' + Date.now(), ia: state.derniereIA || 'IA', origine: 'gemini', verifiee: false,
+    titre: j.titre || `« ${texte} »`, argumentEntendu: texte, variantes: [texte], motsCles: [],
+    replique: String(j.replique || ''), simple: String(j.simple || ''), preuves, recueLe: aujourdhui()
+  };
+}
+
 /* ---------- Gardées ---------- */
 function garder(f) {
-  const copie = { ...f, origine: 'gemini' };
+  const copie = { ...f, origine: 'gemini', ia: f.ia || 'Gemini' };
   if (!copie.theme || !THEMES[copie.theme]) copie.theme = 'autre';
   state.gardees = [copie, ...state.gardees.filter(g => g.id !== copie.id)];
   LS.set('argu.gardees', state.gardees);
