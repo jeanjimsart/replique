@@ -163,19 +163,41 @@ async function choisirModele() {
   if ($('#modele')) remplirModeles(l);
   return m;
 }
-// Un seul point d'appel : si le modèle n'existe plus, on prend le plus récent disponible et on réessaie une fois.
+// Un seul point d'appel. Modèle retiré : on prend le plus récent disponible.
+// Modèle saturé ou quota atteint : on réessaie une fois, puis on passe aux modèles suivants (sans changer le réglage).
+const SATURE = /high demand|overloaded|unavailable|try again later|resource.?exhausted|quota/i;
+function classement() {
+  const l = LS.get('argu.modeles', null) || [];
+  const version = id => parseFloat((id.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+  const note = id => version(id) * 10 + (/flash/.test(id) ? 5 : 0) - (/lite/.test(id) ? 3 : 0) - (/preview|exp/.test(id) ? 2 : 0) - (/latest/.test(id) ? 1 : 0) - (/pro/.test(id) ? 20 : 0);
+  return l.map(m => m.id).sort((x, y) => note(y) - note(x));
+}
 async function appelGemini(corps) {
   const r = state.reglages;
   if (!r.modele) await choisirModele();
-  const essai = () => fetch(`${API}/${encodeURIComponent(state.reglages.modele)}:generateContent`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': r.cle }, body: JSON.stringify(corps)
-  });
-  let rep = await essai(), data = await rep.json().catch(() => ({}));
-  if (!rep.ok && (rep.status === 404 || /no longer available|not found|is not supported|deprecated/i.test(data?.error?.message || ''))) {
-    await choisirModele();
-    rep = await essai(); data = await rep.json().catch(() => ({}));
+  const essai = async m => {
+    const rep = await fetch(`${API}/${encodeURIComponent(m)}:generateContent`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': r.cle }, body: JSON.stringify(corps)
+    });
+    return { rep, data: await rep.json().catch(() => ({})) };
+  };
+  const retire = x => !x.rep.ok && (x.rep.status === 404 || /no longer available|not found|is not supported|deprecated/i.test(x.data?.error?.message || ''));
+  const sature = x => !x.rep.ok && ([429, 500, 503].includes(x.rep.status) || SATURE.test(x.data?.error?.message || ''));
+  let x = await essai(state.reglages.modele);
+  if (retire(x)) { await choisirModele(); x = await essai(state.reglages.modele); }
+  if (sature(x) && x.rep.status !== 429) { await new Promise(ok => setTimeout(ok, 1500)); x = await essai(state.reglages.modele); }
+  if (sature(x)) {
+    if (!LS.get('argu.modeles', null)) { try { LS.set('argu.modeles', await listerModeles()); } catch {} }
+    for (const m of classement().filter(m => m !== state.reglages.modele).slice(0, 3)) {
+      const y = await essai(m);
+      if (y.rep.ok) return { ...y, modele: m };
+      if (!sature(y) && !retire(y)) { x = y; break; }
+    }
   }
-  return { rep, data };
+  if (sature(x)) x.data = { error: { message: x.rep.status === 429
+    ? 'Quota gratuit de Gemini atteint pour l\'instant : réessaie dans une minute. Tes fiches marchent toujours.'
+    : 'Gemini est saturé en ce moment (forte demande chez Google) : réessaie dans une minute. Tes fiches marchent toujours.' } };
+  return { ...x, modele: state.reglages.modele };
 }
 
 async function demanderGemini(argument, proches) {
@@ -195,7 +217,7 @@ async function demanderGemini(argument, proches) {
   });
   if (!rep.ok) {
     const msg = data?.error?.message || `Erreur ${rep.status}`;
-    if (rep.status === 429) throw new Error('Quota gratuit atteint pour l\'instant, réessaie dans une minute.');
+    if (rep.status === 429 || rep.status === 503) throw new Error(msg);
     if (rep.status === 400 && /API key/i.test(msg)) throw new Error('Clé Gemini refusée : vérifie-la dans Réglages.');
     throw new Error(msg);
   }
@@ -250,7 +272,7 @@ Réponds UNIQUEMENT par ce JSON :
 {"preuves":[{"n":1,"verdict":"confirme|inexact|introuvable","note":"courte explication","source2":"organisme, document, date de la source qui confirme","url2":"https://..."}],"simple":"...","replique":"...","ceQuiEstVrai":"...","enFace":{"texte":"...","preuves":[]} ou null}`;
   const { rep, data } = await appelGemini({ contents: [{ role: 'user', parts: [{ text: consigne }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0 } });
   if (!rep.ok) {
-    if (rep.status === 429) throw new Error('Quota gratuit atteint pendant la vérification : réessaie dans une minute.');
+    if ([429, 500, 503].includes(rep.status)) throw new Error(`Pendant la vérification : ${data?.error?.message || 'Gemini indisponible'} Rien n'est affiché tant que ce n'est pas vérifié.`);
     throw new Error('La vérification a échoué : rien n\'est affiché tant que ce n\'est pas vérifié.');
   }
   const v = extraireJSON((data.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join(''));
@@ -655,8 +677,8 @@ function initReglages() {
   $('#btn-tester').onclick = async () => {
     lire(); $('#retour-reglages').textContent = 'Test en cours…';
     try {
-      const { rep, data: d } = await appelGemini({ contents: [{ parts: [{ text: 'Réponds juste OK.' }] }] });
-      $('#retour-reglages').textContent = rep.ok ? `La clé marche ✓ (${state.reglages.modele})` : (d?.error?.message || `Erreur ${rep.status}`);
+      const { rep, data: d, modele } = await appelGemini({ contents: [{ parts: [{ text: 'Réponds juste OK.' }] }] });
+      $('#retour-reglages').textContent = rep.ok ? `La clé marche ✓ (${modele})` : (d?.error?.message || `Erreur ${rep.status}`);
     } catch (e) { $('#retour-reglages').textContent = e.message; }
   };
 }
