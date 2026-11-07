@@ -203,7 +203,8 @@ async function appelGemini(corps) {
       if (!sature(y) && !retire(y)) { x = y; break; }
     }
   }
-  if (sature(x)) x.data = { error: { message: x.rep.status === 504 && x.data?.error?.message === 'timeout'
+  const brutGoogle = (x.data?.error?.message || '').replace(/\s+/g, ' ').slice(0, 300);
+  if (sature(x)) x.data = { error: { detail: brutGoogle, message: x.rep.status === 504 && x.data?.error?.message === 'timeout'
     ? 'Gemini ne répond pas (réseau lent ou serveurs saturés) : réessaie dans une minute. Tes fiches marchent toujours.'
     : x.rep.status === 429
     ? 'Quota gratuit de Gemini atteint pour l\'instant : réessaie dans une minute. Tes fiches marchent toujours.'
@@ -227,7 +228,7 @@ async function demanderGemini(argument, proches) {
       generationConfig: { temperature: 0.3 }
   });
   if (!rep.ok) {
-    const msg = data?.error?.message || `Erreur ${rep.status}`;
+    const msg = (data?.error?.message || `Erreur ${rep.status}`) + (data?.error?.detail && data.error.detail !== 'timeout' ? ` [Google : ${data.error.detail}]` : '');
     if (rep.status === 429 || rep.status === 503) throw new Error(msg);
     if (rep.status === 400 && /API key/i.test(msg)) throw new Error('Clé Gemini refusée : vérifie-la dans Réglages.');
     throw new Error(msg);
@@ -691,7 +692,7 @@ function initReglages() {
     state.surAvancement = t => { $('#retour-reglages').textContent = t; };
     try {
       const { rep, data: d, modele } = await appelGemini({ contents: [{ parts: [{ text: 'Réponds juste OK.' }] }] });
-      $('#retour-reglages').textContent = rep.ok ? `La clé marche ✓ (${modele})` : (d?.error?.message || `Erreur ${rep.status}`);
+      $('#retour-reglages').textContent = rep.ok ? `La clé marche ✓ (${modele})` : (d?.error?.message || `Erreur ${rep.status}`) + (d?.error?.detail ? ` [Google : ${d.error.detail}]` : '');
     } catch (e) { $('#retour-reglages').textContent = e.message; }
     finally { state.surAvancement = null; }
   };
