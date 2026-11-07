@@ -175,26 +175,37 @@ function classement() {
 async function appelGemini(corps) {
   const r = state.reglages;
   if (!r.modele) await choisirModele();
+  const delai = corps.tools ? 60000 : 20000;   // une recherche web peut prendre 30 s ; au-delà, on abandonne ce modèle
   const essai = async m => {
-    const rep = await fetch(`${API}/${encodeURIComponent(m)}:generateContent`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': r.cle }, body: JSON.stringify(corps)
-    });
-    return { rep, data: await rep.json().catch(() => ({})) };
+    const stop = new AbortController(), minuteur = setTimeout(() => stop.abort(), delai);
+    try {
+      const rep = await fetch(`${API}/${encodeURIComponent(m)}:generateContent`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': r.cle }, body: JSON.stringify(corps), signal: stop.signal
+      });
+      return { rep, data: await rep.json().catch(() => ({})) };
+    } catch (e) {
+      if (e.name !== 'AbortError') throw e;
+      return { rep: { ok: false, status: 504 }, data: { error: { message: 'timeout' } } };
+    } finally { clearTimeout(minuteur); }
   };
+  const signaler = t => state.surAvancement?.(t);
   const retire = x => !x.rep.ok && (x.rep.status === 404 || /no longer available|not found|is not supported|deprecated/i.test(x.data?.error?.message || ''));
-  const sature = x => !x.rep.ok && ([429, 500, 503].includes(x.rep.status) || SATURE.test(x.data?.error?.message || ''));
+  const sature = x => !x.rep.ok && ([429, 500, 503, 504].includes(x.rep.status) || SATURE.test(x.data?.error?.message || '') || x.data?.error?.message === 'timeout');
   let x = await essai(state.reglages.modele);
   if (retire(x)) { await choisirModele(); x = await essai(state.reglages.modele); }
-  if (sature(x) && x.rep.status !== 429) { await new Promise(ok => setTimeout(ok, 1500)); x = await essai(state.reglages.modele); }
+  if (sature(x) && ![429, 504].includes(x.rep.status)) { signaler('Gemini est saturé, je réessaie…'); await new Promise(ok => setTimeout(ok, 1500)); x = await essai(state.reglages.modele); }
   if (sature(x)) {
     if (!LS.get('argu.modeles', null)) { try { LS.set('argu.modeles', await listerModeles()); } catch {} }
     for (const m of classement().filter(m => m !== state.reglages.modele).slice(0, 3)) {
+      signaler(`Gemini est saturé, j'essaie ${m}…`);
       const y = await essai(m);
       if (y.rep.ok) return { ...y, modele: m };
       if (!sature(y) && !retire(y)) { x = y; break; }
     }
   }
-  if (sature(x)) x.data = { error: { message: x.rep.status === 429
+  if (sature(x)) x.data = { error: { message: x.rep.status === 504 && x.data?.error?.message === 'timeout'
+    ? 'Gemini ne répond pas (réseau lent ou serveurs saturés) : réessaie dans une minute. Tes fiches marchent toujours.'
+    : x.rep.status === 429
     ? 'Quota gratuit de Gemini atteint pour l\'instant : réessaie dans une minute. Tes fiches marchent toujours.'
     : 'Gemini est saturé en ce moment (forte demande chez Google) : réessaie dans une minute. Tes fiches marchent toujours.' } };
   return { ...x, modele: state.reglages.modele };
@@ -272,7 +283,7 @@ Réponds UNIQUEMENT par ce JSON :
 {"preuves":[{"n":1,"verdict":"confirme|inexact|introuvable","note":"courte explication","source2":"organisme, document, date de la source qui confirme","url2":"https://..."}],"simple":"...","replique":"...","ceQuiEstVrai":"...","enFace":{"texte":"...","preuves":[]} ou null}`;
   const { rep, data } = await appelGemini({ contents: [{ role: 'user', parts: [{ text: consigne }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0 } });
   if (!rep.ok) {
-    if ([429, 500, 503].includes(rep.status)) throw new Error(`Pendant la vérification : ${data?.error?.message || 'Gemini indisponible'} Rien n'est affiché tant que ce n'est pas vérifié.`);
+    if ([429, 500, 503, 504].includes(rep.status)) throw new Error(`Pendant la vérification : ${data?.error?.message || 'Gemini indisponible'} Rien n'est affiché tant que ce n'est pas vérifié.`);
     throw new Error('La vérification a échoué : rien n\'est affiché tant que ce n\'est pas vérifié.');
   }
   const v = extraireJSON((data.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join(''));
@@ -492,6 +503,7 @@ async function repondre(texte) {
 
 async function lancerGemini(texte, proches) {
   afficher(message('<span class="chargement">Gemini cherche des sources…</span>'));
+  state.surAvancement = t => afficher(message(`<span class="chargement">${esc(t)}</span>`));
   try {
     const brut = await demanderGemini(texte, proches);
     afficher(message('<span class="chargement">Vérification des faits, un par un…</span>'));
@@ -507,7 +519,7 @@ async function lancerGemini(texte, proches) {
     noterATraiter(texte, 'Gemini indisponible', e.message);
     const d = message(esc(e.message) + ' Noté dans « À traiter ».', 'erreur');
     afficher(d);
-  }
+  } finally { state.surAvancement = null; }
 }
 
 /* ---------- Récents ---------- */
@@ -676,10 +688,12 @@ function initReglages() {
   };
   $('#btn-tester').onclick = async () => {
     lire(); $('#retour-reglages').textContent = 'Test en cours…';
+    state.surAvancement = t => { $('#retour-reglages').textContent = t; };
     try {
       const { rep, data: d, modele } = await appelGemini({ contents: [{ parts: [{ text: 'Réponds juste OK.' }] }] });
       $('#retour-reglages').textContent = rep.ok ? `La clé marche ✓ (${modele})` : (d?.error?.message || `Erreur ${rep.status}`);
     } catch (e) { $('#retour-reglages').textContent = e.message; }
+    finally { state.surAvancement = null; }
   };
 }
 
