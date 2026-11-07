@@ -184,3 +184,4 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .ia-boutons button { padding-inline: 6px; }
 .bloc-ia .retour { font-size: .84rem; color: var(--doux); margin: 6px 0 0; }
 .bloc-ia textarea { margin-top: 8px; font-size: .85rem; }
+.ia-rapide { display: block; margin: -4px 0 10px; padding: 0; color: var(--gemini); font-size: .84rem; text-align: left; }

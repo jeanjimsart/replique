@@ -99,7 +99,7 @@ function chercher(texte, n = 5) {
   const q = [...new Set(mots(texte))];
   if (!q.length) return [];
   const N = Math.max(state.index.length, 1);
-  const idfInconnu = Math.log(1 + N) * 0.25;
+  const idfInconnu = Math.log(1 + N);   // un mot absent de toutes les fiches (ex. « nazis ») pèse lourd : sans lui, pas de vraie correspondance
   const tn = normaliser(texte);
   const max = q.reduce((s, r) => s + 3 * (state.idf.get(r) ?? idfInconnu), 0);
   return state.index.map(e => {
@@ -397,6 +397,7 @@ function carte(f, { autres = [], question = '', approx = false } = {}) {
   <article class="carte">
     <div class="carte-tete">${badge}${f.desaccordValeurs ? '<span class="badge valeurs">Désaccord de valeurs</span>' : ''}${f.lfiATort ? '<span class="badge lfi-tort">Là, LFI a tort</span>' : ''}${approx ? '<span class="approx">Fiche la plus proche</span>' : ''}</div>
     ${f.titre ? `<h2 class="titre-arg">${esc(f.titre)}</h2>` : ''}
+    ${origine === 'fiche' && question ? `<button class="btn-lien ia-rapide" data-act="gemini">Pas ton argument ? Demander à une IA →</button>` : ''}
     ${f.simple ? `<p class="replique">${esc(f.simple)}</p><div class="precis"><strong>Plus précis</strong><p>${esc(f.replique)}</p></div>` : `<p class="replique">${esc(f.replique)}</p>`}
     ${f.question ? `<div class="question"><strong>Retourne-lui la question</strong><p>${esc(f.question)}</p></div>` : ''}
     ${(() => {
@@ -481,7 +482,9 @@ async function repondre(texte) {
   texte = texte.trim();
   if (!texte) return;
   ajouterRecent(texte);
-  const res = chercher(texte, 8);
+  let res = chercher(texte, 8);
+  // Plusieurs fiches à égalité sous le seuil direct : aucune ne répond vraiment (ex. seul « RN » correspond).
+  if (res.length >= 3 && res[0].conf < SEUIL_DIRECT && res[0].conf - res[2].conf < 0.02) res = res.map(r => ({ ...r, conf: Math.min(r.conf, SEUIL_PROCHE - 0.01) }));
   const meilleur = res[0];
   const geminiDispo = state.reglages.autoGemini && state.reglages.cle && navigator.onLine;
   const montrer = (choix) => afficher(carte(choix.fiche, { autres: res.filter(r => r !== choix && r.conf >= 0.42).slice(0, 3), question: texte }));

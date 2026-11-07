@@ -739,7 +739,10 @@
     "Je ne vois jamais la couleur de mes cotisations",
     "Ceux qui paient ne reçoivent rien",
     "Je suis un contributeur net",
-    "On finance les assistés"
+    "On finance les assistés",
+    "on paye pour les autres",
+    "je paye pour tout le monde",
+    "c'est toujours les mêmes qui payent"
    ],
    "motsCles": [
     "56",
@@ -5834,7 +5837,10 @@
     "le nucléaire coûte plus cher que les renouvelables",
     "LFI a un plan énergie crédible",
     "RTE valide le scénario M0",
-    "le nucléaire est trop cher, RTE le confirme"
+    "le nucléaire est trop cher, RTE le confirme",
+    "le nucléaire c'est la seule solution",
+    "sans le nucléaire on s'éclaire à la bougie",
+    "il faut construire des centrales nucléaires"
    ],
    "motsCles": [
     "2050",
